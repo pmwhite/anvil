@@ -1,4 +1,6 @@
 *.exe
 *.cmi
 *.cmx
+*.cmxa
 *.o
+*.a
