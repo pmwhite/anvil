@@ -65,32 +65,39 @@ let iter_sep_by xs ~f ~sep =
 
 module M : sig
   module Type_expr : sig
-    type t =
-      | Named of string
-      | Reference of string
-      | Poly of (t * t list)
+    type t
   end
 
   module Type : sig
-    type t =
-      | Alias of Type_expr.t
-      | Record of (string * Type_expr.t) list
-      | Variant of (string * Type_expr.t) list
+    type t
   end
 
   module State : sig
-    type t = Type.t String_map.t
+    type t
+  end
 
-    val set_type : string -> Type.t -> t -> t
+  module O : sig
+    (** Use a pre-existing type. *)
+    val ( !! ) : string -> Type_expr.t
+
+    (** Use a managed type. *)
+    val ( ! ) : string -> Type_expr.t
+
+    (** Call a pre-existing type constructor with the given arguments. *)
+    val ( $$ ) : string -> Type_expr.t list -> Type_expr.t
+
+    (** Call a managed type constructor with the given arguments. *)
+    val ( $ ) : string -> Type_expr.t list -> Type_expr.t
+
+    val record : string -> (string * Type_expr.t) list -> State.t -> State.t
   end
 
   val generate : history:(State.t -> State.t) list -> type_order:string list -> string
 end = struct
   module Type_expr = struct
     type t =
-      | Named of string
-      | Reference of string
-      | Poly of (t * t list)
+      | Ext of string * t list
+      | Ref of string * t list
   end
 
   module Type = struct
@@ -98,44 +105,46 @@ end = struct
       | Alias of Type_expr.t
       | Record of (string * Type_expr.t) list
       | Variant of (string * Type_expr.t) list
+    [@@warning "-37"]
+  end
+
+  module State = struct
+    type t = Type.t String_map.t
+  end
+
+  module O = struct
+    let ( !! ) name = Type_expr.Ext (name, [])
+    let ( ! ) name = Type_expr.Ref (name, [])
+    let ( $ ) name args = Type_expr.Ref (name, args)
+    let ( $$ ) name args = Type_expr.Ext (name, args)
+    let record name fields state = String_map.add name (Type.Record fields) state
   end
 
   module Otype_expr = struct
-    type t =
-      | Named of string
-      | Reference of (string * int)
-      | Poly of (t * t list)
+    type t = T of (string * t list)
 
-    let rec equal a b =
-      match[@warning "-4"] a, b with
-      | Named a, Named b -> String.equal a b
-      | Reference a, Reference b -> tuple_equal String.equal Int.equal a b
-      | Poly a, Poly b -> (tuple_equal equal (List.equal equal)) a b
-      | _, _ -> false
+    let rec equal (T a) (T b) = (tuple_equal String.equal (List.equal equal)) a b
+
+    let rec create ~get_version (t : Type_expr.t) : t =
+      match t with
+      | Ext (name, args) -> T (name, List.map (create ~get_version) args)
+      | Ref (name, args) ->
+        T
+          ( Printf.sprintf "%s.V%d.t" name (get_version name)
+          , List.map (create ~get_version) args )
     ;;
 
-    let rec create ~get_version (type_ : Type_expr.t) : t =
-      match type_ with
-      | Named name -> Named name
-      | Reference name -> Reference (name, get_version name)
-      | Poly (t, ts) -> Poly (create ~get_version t, List.map (create ~get_version) ts)
-    ;;
-
-    let rec pp buf = function
-      | Named name -> Buf.string buf name
-      | Reference (name, version) ->
-        Buf.string buf (Printf.sprintf "%s.V%d.t" name version)
-      | Poly (t, ts) ->
-        (match ts with
-         | [] -> ()
-         | [ t ] ->
-           pp buf t;
-           Buf.string buf " "
-         | _ :: _ :: _ ->
-           Buf.string buf "(";
-           iter_sep_by ts ~sep:(fun () -> Buf.string buf ",") ~f:(pp buf);
-           Buf.string buf ") ");
-        pp buf t
+    let rec pp buf (T (name, args)) =
+      (match args with
+       | [] -> ()
+       | [ t ] ->
+         pp buf t;
+         Buf.string buf " "
+       | _ :: _ :: _ ->
+         Buf.string buf "(";
+         iter_sep_by args ~sep:(fun () -> Buf.string buf ",") ~f:(pp buf);
+         Buf.string buf ") ");
+      Buf.string buf name
     ;;
   end
 
@@ -194,12 +203,6 @@ end = struct
           cases;
         Buf.dedent buf
     ;;
-  end
-
-  module State = struct
-    type t = Type.t String_map.t
-
-    let set_type key value t = String_map.add key value t
   end
 
   module Versions = struct
@@ -298,28 +301,24 @@ end = struct
   ;;
 end
 
-open M
-
 let () =
   let history =
-    let int = Type.Named "int" in
-    let string = Type.Named "string" in
-    let point = Type.Reference "Point" in
-    let player = Type.Reference "Player" in
-    let list t = Type.Poly (Named "list", [ t ]) in
+    let open M.O in
+    let int = !!"int" in
+    let string = !!"string" in
+    let point = "Point" in
+    let player = "Player" in
+    let world = "World" in
+    let list t = "list" $$ [ t ] in
     [ (fun state ->
         state
-        |> State.set_type "Point" (Record [ "x", int; "y", int ])
-        |> State.set_type "Player" (Record [ "position", point; "health", int ])
-        |> State.set_type "World" (Record [ "players", list player; "health", int ]))
+        |> record point [ "x", int; "y", int ]
+        |> record player [ "position", !point; "health", int ]
+        |> record world [ "players", list !player; "health", int ])
+    ; (fun state -> state |> record point [ "x", int; "y", int; "z", int ])
     ; (fun state ->
-        state |> State.set_type "Point" (Record [ "x", int; "y", int; "z", int ]))
-    ; (fun state ->
-        state
-        |> State.set_type
-             "Player"
-             (Record [ "position", point; "health", int; "name", string ]))
+        state |> record player [ "position", !point; "health", int; "name", string ])
     ]
   in
-  print_string (generate ~history ~type_order:[ "Point"; "Player"; "World" ])
+  print_string (M.generate ~history ~type_order:[ "Point"; "Player"; "World" ])
 ;;
