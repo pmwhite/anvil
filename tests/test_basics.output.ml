@@ -39,6 +39,37 @@ module Player = struct
   end
 end
 
+module Tree = struct
+  module V2 = struct
+    type t = 
+      | Birch
+      | Oak
+      | Elm
+      | Maple
+  end
+
+  module V1 = struct
+    type t = 
+      | Birch
+      | Oak
+      | Elm
+  end
+end
+
+module Plant = struct
+  module V2 = struct
+    type t = 
+      | Tree of Tree.V2.t
+      | Rock
+  end
+
+  module V1 = struct
+    type t = 
+      | Tree of Tree.V1.t
+      | Rock
+  end
+end
+
 module World = struct
   module V3 = struct
     type t = 

@@ -65,7 +65,7 @@ module Type = struct
   type t =
     | Alias of Type_expr.t
     | Record of (string * Type_expr.t) list
-    | Variant of (string * Type_expr.t) list
+    | Variant of (string * Type_expr.t list) list
   [@@warning "-37"]
 end
 
@@ -79,6 +79,7 @@ module O = struct
   let ( $ ) name args = Type_expr.Ref (name, args)
   let ( $$ ) name args = Type_expr.Ext (name, args)
   let record name fields state = String_map.add name (Type.Record fields) state
+  let variant name cases state = String_map.add name (Type.Variant cases) state
 end
 
 module Otype_expr = struct
@@ -113,13 +114,14 @@ module Otype = struct
   type t =
     | Alias of Otype_expr.t
     | Record of (string * Otype_expr.t) list
-    | Variant of (string * Otype_expr.t) list
+    | Variant of (string * Otype_expr.t list) list
 
   let equal a b =
     match[@warning "-4"] a, b with
     | Alias a, Alias b -> Otype_expr.equal a b
     | Record a, Record b -> List.equal (tuple_equal String.equal Otype_expr.equal) a b
-    | Variant a, Variant b -> List.equal (tuple_equal String.equal Otype_expr.equal) a b
+    | Variant a, Variant b ->
+      List.equal (tuple_equal String.equal (List.equal Otype_expr.equal)) a b
     | _, _ -> false
   ;;
 
@@ -129,7 +131,10 @@ module Otype = struct
     | Record ts ->
       Record (List.map (fun (name, t) -> name, Otype_expr.create ~get_version t) ts)
     | Variant ts ->
-      Variant (List.map (fun (name, t) -> name, Otype_expr.create ~get_version t) ts)
+      Variant
+        (List.map
+           (fun (name, ts) -> name, List.map (Otype_expr.create ~get_version) ts)
+           ts)
   ;;
 
   let pp buf = function
@@ -157,9 +162,12 @@ module Otype = struct
       Buf.newline buf;
       Buf.indent buf;
       List.iter
-        (fun (name, t) ->
-          Buf.string buf (Printf.sprintf "| %s of " name);
-          Otype_expr.pp buf t;
+        (fun (name, ts) ->
+          (match ts with
+           | [] -> Buf.string buf (Printf.sprintf "| %s" name)
+           | _ :: _ ->
+             Buf.string buf (Printf.sprintf "| %s of " name);
+             iter_sep_by ts ~sep:(fun () -> Buf.string buf " * ") ~f:(Otype_expr.pp buf));
           Buf.newline buf)
         cases;
       Buf.dedent buf

@@ -20,6 +20,7 @@ module O : sig
   val ( $ ) : string -> Type_expr.t list -> Type_expr.t
 
   val record : string -> (string * Type_expr.t) list -> Change.t
+  val variant : string -> (string * Type_expr.t list) list -> Change.t
 end
 
 val generate : history:Change.t list list -> type_order:string list -> string
