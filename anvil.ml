@@ -69,8 +69,8 @@ module Type = struct
   [@@warning "-37"]
 end
 
-module State = struct
-  type t = Type.t String_map.t
+module Change = struct
+  type t = Type.t String_map.t -> Type.t String_map.t
 end
 
 module O = struct
@@ -218,11 +218,15 @@ let pp_versions buf versions ~type_order =
 ;;
 
 let generate ~history ~type_order =
-  let rec collect_versions (prev : State.t) (acc : Versions.t String_map.t) history =
+  let rec collect_versions
+    (prev : Type.t String_map.t)
+    (acc : Versions.t String_map.t)
+    history
+    =
     match history with
     | [] -> acc
-    | update :: history ->
-      let next = update prev in
+    | changes :: history ->
+      let next = List.fold_left (fun acc change -> change acc) prev changes in
       let maybe_update_version acc name =
         match String_map.find_opt name next with
         | None -> acc

@@ -2,11 +2,7 @@ module Type_expr : sig
   type t
 end
 
-module Type : sig
-  type t
-end
-
-module State : sig
+module Change : sig
   type t
 end
 
@@ -23,7 +19,7 @@ module O : sig
   (** Call a managed type constructor with the given arguments. *)
   val ( $ ) : string -> Type_expr.t list -> Type_expr.t
 
-  val record : string -> (string * Type_expr.t) list -> State.t -> State.t
+  val record : string -> (string * Type_expr.t) list -> Change.t
 end
 
-val generate : history:(State.t -> State.t) list -> type_order:string list -> string
+val generate : history:Change.t list list -> type_order:string list -> string
