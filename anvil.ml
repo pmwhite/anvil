@@ -61,7 +61,7 @@ module Type_expr = struct
     | Ref of string * t list
 end
 
-module Type = struct
+module Type1 = struct
   type t =
     | Alias of Type_expr.t
     | Record of (string * Type_expr.t) list
@@ -69,8 +69,18 @@ module Type = struct
   [@@warning "-37"]
 end
 
+module Type = struct
+  type t =
+    | Fixed of Type1.t
+    | Versioned of Type1.t
+end
+
+module State = struct
+  type t = Type.t String_map.t
+end
+
 module Change = struct
-  type t = Type.t String_map.t -> Type.t String_map.t
+  type t = State.t -> State.t
 end
 
 module O = struct
@@ -78,8 +88,16 @@ module O = struct
   let ( ! ) name = Type_expr.Ref (name, [])
   let ( $ ) name args = Type_expr.Ref (name, args)
   let ( $$ ) name args = Type_expr.Ext (name, args)
-  let record name fields state = String_map.add name (Type.Record fields) state
-  let variant name cases state = String_map.add name (Type.Variant cases) state
+
+  let record ?(versioned = false) name fields state =
+    let type_ = Type1.Record fields in
+    String_map.add name (if versioned then Type.Versioned type_ else Fixed type_) state
+  ;;
+
+  let variant ?(versioned = false) name cases state =
+    let type_ = Type1.Variant cases in
+    String_map.add name (if versioned then Type.Versioned type_ else Fixed type_) state
+  ;;
 end
 
 module Otype_expr = struct
@@ -110,7 +128,7 @@ module Otype_expr = struct
   ;;
 end
 
-module Otype = struct
+module Otype1 = struct
   type t =
     | Alias of Otype_expr.t
     | Record of (string * Otype_expr.t) list
@@ -125,7 +143,7 @@ module Otype = struct
     | _, _ -> false
   ;;
 
-  let create ~get_version (t : Type.t) : t =
+  let create ~get_version (t : Type1.t) : t =
     match t with
     | Alias t -> Alias (Otype_expr.create ~get_version t)
     | Record ts ->
@@ -142,7 +160,7 @@ module Otype = struct
       Buf.string buf "type t = ";
       Otype_expr.pp buf t
     | Record fields ->
-      Buf.string buf "type t = ";
+      Buf.string buf "type t =";
       Buf.newline buf;
       Buf.indent buf;
       Buf.string buf "{ ";
@@ -158,7 +176,7 @@ module Otype = struct
       Buf.newline buf;
       Buf.dedent buf
     | Variant cases ->
-      Buf.string buf "type t = ";
+      Buf.string buf "type t =";
       Buf.newline buf;
       Buf.indent buf;
       List.iter
@@ -174,19 +192,89 @@ module Otype = struct
   ;;
 end
 
-module Versions = struct
+module Otype = struct
+  type t =
+    | Fixed of Otype1.t
+    | Versioned of
+        { hd : Otype1.t
+        ; tl : Otype1.t list
+        }
+
+  let pp buf t =
+    match t with
+    | Fixed t -> Otype1.pp buf t
+    | Versioned { hd; tl } ->
+      let indexed_cases =
+        List.rev (List.mapi (fun i t -> i + 1, t) (List.rev (hd :: tl)))
+      in
+      iter_sep_by
+        indexed_cases
+        ~sep:(fun () -> Buf.newline buf)
+        ~f:(fun (i, t) ->
+          Buf.string buf (Printf.sprintf "module V%d = struct" i);
+          Buf.newline buf;
+          Buf.indent buf;
+          Otype1.pp buf t;
+          Buf.dedent buf;
+          Buf.string buf "end";
+          Buf.newline buf);
+      Buf.newline buf;
+      Buf.string buf "type t =";
+      Buf.newline buf;
+      Buf.indent buf;
+      List.iter
+        (fun (i, _) ->
+          Buf.string buf (Printf.sprintf "| V%d of V%d.t" i i);
+          Buf.newline buf)
+        (List.rev indexed_cases);
+      Buf.dedent buf
+  ;;
+end
+
+module Versions : sig
+  type t
+
+  val init : get_version:(string -> int) -> Type.t -> t
+  val add : get_version:(string -> int) -> Type.t -> t -> t
+  val current_version : t -> int
+  val pp : Buf.t -> name:string -> t -> unit
+end = struct
   type t =
     { current_version : int
     ; hd : Otype.t
     ; tl : Otype.t list
     }
 
-  let init hd = { current_version = 1; hd; tl = [] }
+  let init ~get_version (t : Type.t) =
+    let hd : Otype.t =
+      match t with
+      | Fixed hd -> Fixed (Otype1.create ~get_version hd)
+      | Versioned hd -> Versioned { hd = Otype1.create ~get_version hd; tl = [] }
+    in
+    { current_version = 1; hd; tl = [] }
+  ;;
 
-  let add v t =
-    if Otype.equal v t.hd
-    then t
-    else { current_version = t.current_version + 1; hd = v; tl = t.hd :: t.tl }
+  let add ~get_version (a : Type.t) t =
+    match a, t.hd with
+    | Fixed a, Fixed b ->
+      let a = Otype1.create ~get_version a in
+      if Otype1.equal a b
+      then t
+      else { current_version = t.current_version + 1; hd = Fixed a; tl = t.hd :: t.tl }
+    | Fixed a, Versioned _ ->
+      let a = Otype1.create ~get_version a in
+      { current_version = t.current_version + 1; hd = Fixed a; tl = t.hd :: t.tl }
+    | Versioned a, Fixed _ ->
+      let a = Otype1.create ~get_version a in
+      { current_version = t.current_version + 1
+      ; hd = Versioned { hd = a; tl = [] }
+      ; tl = t.hd :: t.tl
+      }
+    | Versioned a, Versioned b ->
+      let a = Otype1.create ~get_version a in
+      if Otype1.equal a b.hd
+      then t
+      else { t with hd = Versioned { hd = a; tl = b.hd :: b.tl } }
   ;;
 
   let current_version t = t.current_version
@@ -226,11 +314,7 @@ let pp_versions buf versions ~type_order =
 ;;
 
 let generate ~history ~type_order =
-  let rec collect_versions
-    (prev : Type.t String_map.t)
-    (acc : Versions.t String_map.t)
-    history
-    =
+  let rec collect_versions (prev : State.t) (acc : Versions.t String_map.t) history =
     match history with
     | [] -> acc
     | changes :: history ->
@@ -243,25 +327,22 @@ let generate ~history ~type_order =
             name
             (function
               | None ->
-                let next_otype =
-                  Otype.create
-                    ~get_version:(fun n ->
-                      if String.equal n name
-                      then 1
-                      else Versions.current_version (find_by_type_name n acc))
-                    next_type
-                in
-                Some (Versions.init next_otype)
+                Some
+                  (Versions.init
+                     ~get_version:(fun n ->
+                       if String.equal n name
+                       then 1
+                       else Versions.current_version (find_by_type_name n acc))
+                     next_type)
               | Some versions ->
-                let next_otype =
-                  Otype.create
-                    ~get_version:(fun n ->
-                      if String.equal n name
-                      then Versions.current_version versions
-                      else Versions.current_version (find_by_type_name n acc))
-                    next_type
-                in
-                Some (Versions.add next_otype versions))
+                Some
+                  (Versions.add
+                     ~get_version:(fun n ->
+                       if String.equal n name
+                       then Versions.current_version versions
+                       else Versions.current_version (find_by_type_name n acc))
+                     next_type
+                     versions))
             acc
       in
       let acc = List.fold_left maybe_update_version acc type_order in

@@ -19,8 +19,8 @@ module O : sig
   (** Call a managed type constructor with the given arguments. *)
   val ( $ ) : string -> Type_expr.t list -> Type_expr.t
 
-  val record : string -> (string * Type_expr.t) list -> Change.t
-  val variant : string -> (string * Type_expr.t list) list -> Change.t
+  val record : ?versioned:bool -> string -> (string * Type_expr.t) list -> Change.t
+  val variant : ?versioned:bool -> string -> (string * Type_expr.t list) list -> Change.t
 end
 
 val generate : history:Change.t list list -> type_order:string list -> string

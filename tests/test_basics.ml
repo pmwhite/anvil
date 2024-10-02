@@ -19,6 +19,10 @@ let () =
       ; variant plant [ "Tree", [ !tree ]; "Rock", [] ]
       ]
     ; [ variant tree [ "Birch", []; "Oak", []; "Elm", []; "Maple", [] ] ]
+    ; [ record point ~versioned:true [ "x", int; "y", int; "z", int ] ]
+    ; [ record point ~versioned:true [ "w", int; "x", int; "y", int; "z", int ] ]
+    ; [ record world ~versioned:true [ "players", list !player; "health", int ] ]
+    ; [ record point [ "w", int; "x", int; "y", int; "z", int ] ]
     ]
   in
   print_string (Anvil.generate ~history ~type_order:[ point; player; tree; plant; world ])
