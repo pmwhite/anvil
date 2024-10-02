@@ -69,10 +69,17 @@ module Type1 = struct
   [@@warning "-37"]
 end
 
+module Version_scheme = struct
+  type t =
+    | Fixed
+    | Versioned
+end
+
 module Type = struct
   type t =
-    | Fixed of Type1.t
-    | Versioned of Type1.t
+    { version_scheme : Version_scheme.t
+    ; type_ : Type1.t
+    }
 end
 
 module State = struct
@@ -89,14 +96,12 @@ module O = struct
   let ( $ ) name args = Type_expr.Ref (name, args)
   let ( $$ ) name args = Type_expr.Ext (name, args)
 
-  let record ?(versioned = false) name fields state =
-    let type_ = Type1.Record fields in
-    String_map.add name (if versioned then Type.Versioned type_ else Fixed type_) state
+  let record ?(version_scheme = Version_scheme.Fixed) name fields state =
+    String_map.add name { Type.version_scheme; type_ = Record fields } state
   ;;
 
-  let variant ?(versioned = false) name cases state =
-    let type_ = Type1.Variant cases in
-    String_map.add name (if versioned then Type.Versioned type_ else Fixed type_) state
+  let variant ?(version_scheme = Version_scheme.Fixed) name cases state =
+    String_map.add name { Type.version_scheme; type_ = Variant cases } state
   ;;
 end
 
@@ -247,31 +252,29 @@ end = struct
 
   let init ~get_version (t : Type.t) =
     let hd : Otype.t =
-      match t with
-      | Fixed hd -> Fixed (Otype1.create ~get_version hd)
-      | Versioned hd -> Versioned { hd = Otype1.create ~get_version hd; tl = [] }
+      match t.version_scheme with
+      | Fixed -> Fixed (Otype1.create ~get_version t.type_)
+      | Versioned -> Versioned { hd = Otype1.create ~get_version t.type_; tl = [] }
     in
     { current_version = 1; hd; tl = [] }
   ;;
 
   let add ~get_version (a : Type.t) t =
-    match a, t.hd with
-    | Fixed a, Fixed b ->
-      let a = Otype1.create ~get_version a in
+    let version_scheme = a.version_scheme in
+    let a = Otype1.create ~get_version a.type_ in
+    match version_scheme, t.hd with
+    | Fixed, Fixed b ->
       if Otype1.equal a b
       then t
       else { current_version = t.current_version + 1; hd = Fixed a; tl = t.hd :: t.tl }
-    | Fixed a, Versioned _ ->
-      let a = Otype1.create ~get_version a in
+    | Fixed, Versioned _ ->
       { current_version = t.current_version + 1; hd = Fixed a; tl = t.hd :: t.tl }
-    | Versioned a, Fixed _ ->
-      let a = Otype1.create ~get_version a in
+    | Versioned, Fixed _ ->
       { current_version = t.current_version + 1
       ; hd = Versioned { hd = a; tl = [] }
       ; tl = t.hd :: t.tl
       }
-    | Versioned a, Versioned b ->
-      let a = Otype1.create ~get_version a in
+    | Versioned, Versioned b ->
       if Otype1.equal a b.hd
       then t
       else { t with hd = Versioned { hd = a; tl = b.hd :: b.tl } }
