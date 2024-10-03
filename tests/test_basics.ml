@@ -27,5 +27,8 @@ let () =
     ; [ record point [ "w", int; "x", int; "y", int; "z", int ] ]
     ]
   in
-  print_string (Anvil.generate ~history ~type_order:[ point; player; tree; plant; world ])
+  Anvil.generate
+    ~history
+    ~type_order:[ point; player; tree; plant; world ]
+    ~file_pattern:"test_basics_output"
 ;;

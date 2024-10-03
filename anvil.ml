@@ -316,7 +316,7 @@ let pp_versions buf versions ~type_order =
     ~f:(fun name -> Versions.pp buf ~name (find_by_type_name name versions))
 ;;
 
-let generate ~history ~type_order =
+let generate ~history ~type_order ~file_pattern =
   let rec collect_versions (prev : State.t) (acc : Versions.t String_map.t) history =
     match history with
     | [] -> acc
@@ -352,7 +352,11 @@ let generate ~history ~type_order =
       collect_versions next acc history
   in
   let versions = collect_versions String_map.empty String_map.empty history in
-  let buf = Buf.create 1024 in
-  pp_versions buf versions ~type_order;
-  Buf.contents buf
+  let () =
+    let buf = Buf.create 1024 in
+    pp_versions buf versions ~type_order;
+    Out_channel.with_open_bin (Printf.sprintf "%s_protocol.ml" file_pattern) (fun oc ->
+      Out_channel.output_string oc (Buf.contents buf))
+  in
+  ()
 ;;

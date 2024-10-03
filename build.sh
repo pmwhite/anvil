@@ -7,4 +7,4 @@ ocamlopt $warnings anvil.mli -o anvil.cmi
 ocamlopt $warnings anvil.ml -a -cmi-file anvil.cmi -o anvil.cmxa 
 
 ocamlopt $warnings -I . anvil.cmx tests/test_basics.ml -o tests/test_basics.exe
-tests/test_basics.exe > tests/test_basics.output.ml
+(cd tests && ./test_basics.exe)

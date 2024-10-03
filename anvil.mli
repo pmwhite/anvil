@@ -38,4 +38,8 @@ module O : sig
     -> Change.t
 end
 
-val generate : history:Change.t list list -> type_order:string list -> string
+val generate
+  :  history:Change.t list list
+  -> type_order:string list
+  -> file_pattern:string
+  -> unit
